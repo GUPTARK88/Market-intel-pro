@@ -62,8 +62,8 @@ export default function MarketIntelPro() {
   const fetchAllNews = async (nKey, gKey) => {
     setLoading(true);
     try {
-      const mRes = await fetch("https://newsapi.org/v2/everything?q=stock+market+earnings+economy&sortBy=publishedAt&language=en&pageSize=5&apiKey=" + nKey);
-      const gRes = await fetch("https://newsapi.org/v2/everything?q=iran+war+china+gold+OPEC+trade&sortBy=publishedAt&language=en&pageSize=3&apiKey=" + nKey);
+const mRes = await fetch("/api/news?type=market&key=" + nKey);
+const gRes = await fetch("/api/news?type=geo&key=" + nKey);
       const mData = await mRes.json();
       const gData = await gRes.json();
 
