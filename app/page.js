@@ -27,7 +27,8 @@ export default function MarketIntelPro() {
 
   const analyzeWithGemini = async (text, gemKey) => {
     try {
-      const prompt = "You are a financial analyst. Analyze this news and return ONLY a JSON object, no markdown. NEWS: " + text + " Return: {\"stocks\":[{\"symbol\":\"AAPL\",\"impact\":\"positive\",\"magnitude\":\"high\",\"reason\":\"earnings beat\",\"move\":\"+5-8%\"}],\"metals\":[{\"name\":\"Gold\",\"impact\":\"positive\",\"magnitude\":\"medium\",\"reason\":\"safe haven\",\"move\":\"+1-2%\"}],\"sentiment\":\"bullish\",\"severity\":\"high\",\"summary\":\"One line summary\"}";
+      const prompt = "You are an expert Wall Street financial analyst. Your job is to analyze market news and identify investment impact. Be aggressive in identifying HIGH impact news. IMPORTANT RULES: If news mentions Fed/Federal Reserve = HIGH severity. If news mentions earnings beat/miss = HIGH severity. If news mentions rate decision = HIGH severity. If news mentions war/sanctions/crisis = HIGH severity. If news mentions acquisition/merger = HIGH severity. Analyze this news: " + text + " Return ONLY this JSON (no markdown): {\"stocks\":[{\"symbol\":\"AAPL\",\"impact\":\"positive\",\"magnitude\":\"high\",\"reason\":\"specific reason\",\"move\":\"+5-8%\"},{\"symbol\":\"MSFT\",\"impact\":\"negative\",\"magnitude\":\"medium\",\"reason\":\"specific reason\",\"move\":\"-2-3%\"}],\"metals\":[{\"name\":\"Gold\",\"impact\":\"positive\",\"magnitude\":\"medium\",\"reason\":\"safe haven demand\",\"move\":\"+1-2%\"}],\"sentiment\":\"bullish\",\"severity\":\"high\",\"summary\":\"One sentence investment summary with clear action\",\"action\":\"BUY tech stocks before market open\"}";
+
       const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + gemKey, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -50,26 +51,32 @@ export default function MarketIntelPro() {
     } catch (e) { setFedRate(4.5); }
   };
 
-  const fetchMetals = () => {
-    setMetals({
-      Gold: { price: "$2,150/oz", change: "+0.3%", up: true },
-      Silver: { price: "$28.50/oz", change: "+0.8%", up: true },
-      Copper: { price: "$4.25/lb", change: "-0.5%", up: false },
-      Oil: { price: "$82.45/bbl", change: "+1.2%", up: true }
-    });
+  const fetchMetals = async () => {
+    try {
+      const res = await fetch("/api/metals");
+      const data = await res.json();
+      setMetals(data);
+    } catch (e) {
+      setMetals({
+        gold: { price: "$2,150/oz", change: "+0.3%", up: true },
+        silver: { price: "$28.50/oz", change: "+0.8%", up: true },
+        copper: { price: "$4.25/lb", change: "-0.5%", up: false },
+        oil: { price: "$82.45/bbl", change: "+1.2%", up: true }
+      });
+    }
   };
 
   const fetchAllNews = async (nKey, gKey) => {
     setLoading(true);
     try {
-const mRes = await fetch("/api/news?type=market&key=" + nKey);
-const gRes = await fetch("/api/news?type=geo&key=" + nKey);
+      const mRes = await fetch("/api/news?type=market&key=" + nKey);
+      const gRes = await fetch("/api/news?type=geo&key=" + nKey);
       const mData = await mRes.json();
       const gData = await gRes.json();
 
       if (mData.articles?.length) {
         const analyzed = await Promise.all(
-          mData.articles.slice(0, 4).map(async (a) => {
+          mData.articles.slice(0, 5).map(async (a) => {
             const analysis = await analyzeWithGemini(a.title + " " + (a.description || ""), gKey);
             return {
               id: a.url, headline: a.title, description: a.description,
@@ -77,28 +84,29 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
               time: new Date(a.publishedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
               url: a.url, stocks: analysis?.stocks || [], metals: analysis?.metals || [],
               sentiment: analysis?.sentiment || "neutral", severity: analysis?.severity || "low",
-              summary: analysis?.summary || "", isNew: true
+              summary: analysis?.summary || "", action: analysis?.action || "",
+              isNew: true
             };
           })
         );
         setNews(analyzed);
         analyzed.forEach(item => {
           if (item.severity === "high" && "Notification" in window && Notification.permission === "granted") {
-            new Notification("Market Alert!", { body: item.headline.substring(0, 100) });
+            new Notification("High Impact Alert!", { body: item.headline.substring(0, 100) });
           }
         });
       }
 
       if (gData.articles?.length) {
         const analyzed = await Promise.all(
-          gData.articles.slice(0, 3).map(async (a) => {
+          gData.articles.slice(0, 4).map(async (a) => {
             const analysis = await analyzeWithGemini(a.title + " " + (a.description || ""), gKey);
             return {
               id: a.url, headline: a.title, source: a.source?.name,
               time: new Date(a.publishedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
               url: a.url, stocks: analysis?.stocks || [], metals: analysis?.metals || [],
               sentiment: analysis?.sentiment || "neutral", severity: analysis?.severity || "medium",
-              summary: analysis?.summary || ""
+              summary: analysis?.summary || "", action: analysis?.action || ""
             };
           })
         );
@@ -116,7 +124,7 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
       fetchFedRate(); fetchMetals();
       fetchAllNews(savedNewsKey, savedGeminiKey);
       if ("Notification" in window) Notification.requestPermission();
-      const interval = setInterval(() => fetchAllNews(savedNewsKey, savedGeminiKey), 30000);
+      const interval = setInterval(() => { fetchAllNews(savedNewsKey, savedGeminiKey); fetchMetals(); }, 30000);
       return () => clearInterval(interval);
     }
   }, [showSetup, savedNewsKey, savedGeminiKey]);
@@ -134,16 +142,14 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
   const sorted = [...news].sort((a, b) => ({ high: 3, medium: 2, low: 1 }[b.severity] || 0) - ({ high: 3, medium: 2, low: 1 }[a.severity] || 0));
   const filtered = filter === "all" ? sorted : sorted.filter(n => n.severity === filter);
 
-  const S = { page: { minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", color: "#e2e8f0", fontFamily: "-apple-system,sans-serif", padding: "16px" } };
-
   return (
-    <div style={S.page}>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%)", color: "#e2e8f0", fontFamily: "-apple-system,sans-serif", padding: "16px" }}>
       <div style={{ maxWidth: "900px", margin: "0 auto" }}>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", flexWrap: "wrap", gap: "12px" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: "26px", fontWeight: 700, color: "#fff" }}>Market Intel Pro</h1>
-            <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>Real-time stocks, geopolitics and metals</p>
+            <p style={{ margin: "4px 0 0", fontSize: "13px", color: "#64748b" }}>Real-time investment intelligence</p>
           </div>
           {lastUpdate && <div style={{ textAlign: "right" }}>
             <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>Last Updated</p>
@@ -173,6 +179,7 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
               {fedRate && <div style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.3)", borderRadius: "10px", padding: "12px" }}>
                 <p style={{ margin: "0 0 4px", fontSize: "11px", color: "#60a5fa" }}>FED RATE</p>
                 <p style={{ margin: 0, fontSize: "26px", fontWeight: 700, color: "#bfdbfe" }}>{fedRate}%</p>
+                <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#60a5fa" }}>US Federal Reserve</p>
               </div>}
               {metals && Object.entries(metals).map(([k, v]) => (
                 <div key={k} style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.25)", borderRadius: "10px", padding: "12px" }}>
@@ -189,7 +196,7 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
                   {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
                 </button>
               ))}
-              <button onClick={() => fetchAllNews(savedNewsKey, savedGeminiKey)} disabled={loading} style={{ padding: "5px 12px", borderRadius: "20px", border: "1px solid #334155", background: "transparent", color: "#94a3b8", fontSize: "12px", cursor: "pointer", marginLeft: "auto" }}>
+              <button onClick={() => { fetchAllNews(savedNewsKey, savedGeminiKey); fetchMetals(); }} disabled={loading} style={{ padding: "5px 12px", borderRadius: "20px", border: "1px solid #334155", background: "transparent", color: "#94a3b8", fontSize: "12px", cursor: "pointer", marginLeft: "auto" }}>
                 {loading ? "Loading..." : "Refresh"}
               </button>
             </div>
@@ -204,7 +211,8 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
                       <span style={{ background: sc[a.severity], color: "#fff", padding: "2px 8px", borderRadius: "10px", fontSize: "10px", fontWeight: 700, whiteSpace: "nowrap" }}>{(a.severity || "").toUpperCase()}</span>
                     </div>
                     <p style={{ margin: "0 0 6px", fontSize: "11px", color: "#64748b" }}>{a.time} - {a.source}</p>
-                    {a.summary && <p style={{ margin: "0 0 8px", fontSize: "12px", color: "#cbd5e1" }}>{a.summary}</p>}
+                    {a.summary && <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#cbd5e1" }}>{a.summary}</p>}
+                    {a.action && <p style={{ margin: "0 0 8px", fontSize: "12px", color: "#10b981", fontWeight: 600 }}>Action: {a.action}</p>}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                       {a.stocks?.map((s, j) => (
                         <div key={j} style={{ background: "rgba(15,23,42,0.6)", border: "1px solid #334155", borderRadius: "6px", padding: "6px 10px" }}>
@@ -220,7 +228,7 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
             )}
 
             <h2 style={{ margin: "0 0 10px", fontSize: "15px", color: "#10b981", fontWeight: 700 }}>Market News - Ranked by Impact</h2>
-            {loading && news.length === 0 && <p style={{ color: "#64748b", textAlign: "center", padding: "40px 0" }}>Fetching live news and analyzing impacts...</p>}
+            {loading && news.length === 0 && <p style={{ color: "#64748b", textAlign: "center", padding: "40px 0" }}>Fetching investment news and analyzing impacts...</p>}
 
             <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               {filtered.map((item, idx) => (
@@ -233,8 +241,13 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
                       {item.isNew && <span style={{ background: "#10b981", color: "#fff", padding: "2px 6px", borderRadius: "10px", fontSize: "9px", fontWeight: 700, textAlign: "center" }}>NEW</span>}
                     </div>
                   </div>
-                  <p style={{ margin: "0 0 6px", fontSize: "11px", color: "#64748b" }}>{item.time} - {item.source}</p>
-                  {item.summary && <p style={{ margin: "0 0 10px", fontSize: "12px", color: "#94a3b8" }}>{item.summary}</p>}
+                  <p style={{ margin: "0 0 4px", fontSize: "11px", color: "#64748b" }}>{item.time} - {item.source}</p>
+                  {item.summary && <p style={{ margin: "0 0 4px", fontSize: "12px", color: "#94a3b8" }}>{item.summary}</p>}
+                  {item.action && (
+                    <div style={{ margin: "6px 0 10px", padding: "8px 12px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: "8px" }}>
+                      <p style={{ margin: 0, fontSize: "12px", color: "#10b981", fontWeight: 700 }}>Suggested Action: {item.action}</p>
+                    </div>
+                  )}
 
                   {item.stocks?.length > 0 && (
                     <div style={{ borderTop: "1px solid rgba(100,116,139,0.2)", paddingTop: "10px", marginTop: "6px" }}>
@@ -278,7 +291,7 @@ const gRes = await fetch("/api/news?type=geo&key=" + nKey);
             </div>
 
             <div style={{ marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #1e293b", textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: "11px", color: "#334155" }}>Market Intel Pro - Auto-updates every 30 seconds</p>
+              <p style={{ margin: 0, fontSize: "11px", color: "#334155" }}>Market Intel Pro - Investment news only - Auto-updates every 30 seconds</p>
               <button onClick={() => { localStorage.clear(); setShowSetup(true); setSavedNewsKey(""); setSavedGeminiKey(""); }} style={{ marginTop: "6px", background: "none", border: "none", color: "#475569", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>Change API Keys</button>
             </div>
           </div>
