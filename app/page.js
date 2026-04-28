@@ -9,33 +9,33 @@ export default function MarketIntelPro() {
   const [loading, setLoading] = useState(false);
   const [lastUpdate, setLastUpdate] = useState("");
   const [showSetup, setShowSetup] = useState(true);
-  const [newsKey, setNewsKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
-  const [alphaKey, setAlphaKey] = useState("");
-  const [savedNewsKey, setSavedNewsKey] = useState("");
+  const [finnhubKey, setFinnhubKey] = useState("");
+  const [marketauxKey, setMarketauxKey] = useState("");
   const [savedGeminiKey, setSavedGeminiKey] = useState("");
-  const [savedAlphaKey, setSavedAlphaKey] = useState("");
+  const [savedFinnhubKey, setSavedFinnhubKey] = useState("");
+  const [savedMarketauxKey, setSavedMarketauxKey] = useState("");
   const [filter, setFilter] = useState("all");
 
-  useEffect(() => {
+  useEffect(function() {
     if (typeof window !== "undefined") {
-      const nk = localStorage.getItem("newsapi_key") || "";
       const gk = localStorage.getItem("gemini_key") || "";
-      const ak = localStorage.getItem("alpha_key") || "";
-      setSavedNewsKey(nk);
+      const fk = localStorage.getItem("finnhub_key") || "";
+      const mk = localStorage.getItem("marketaux_key") || "";
       setSavedGeminiKey(gk);
-      setSavedAlphaKey(ak);
-      if (gk && (nk || ak)) setShowSetup(false);
+      setSavedFinnhubKey(fk);
+      setSavedMarketauxKey(mk);
+      if (gk && (fk || mk)) setShowSetup(false);
     }
   }, []);
 
-  const analyzeWithGemini = async (article, gemKey) => {
+  const analyzeWithGemini = async function(article, gemKey) {
     try {
       const tickerInfo = article.tickers && article.tickers.length > 0
-        ? "Known tickers: " + article.tickers.map(function(t) { return t.ticker; }).join(", ") + ". "
+        ? "Known tickers from news: " + article.tickers.map(function(t) { return t.ticker + "(" + t.ticker_sentiment_label + ")"; }).join(", ") + ". "
         : "";
 
-      const prompt = "You are a Wall Street analyst. " + tickerInfo + "Analyze this news for investment impact. Mark HIGH severity if: earnings beat/miss, Fed decision, rate change, acquisition, war/crisis, major price move. NEWS: " + article.title + " " + (article.description || "") + " Return ONLY JSON no markdown: {\"stocks\":[{\"symbol\":\"AAPL\",\"impact\":\"positive\",\"magnitude\":\"high\",\"reason\":\"earnings beat\",\"move\":\"+5-8%\",\"confidence\":85}],\"metals\":[{\"name\":\"Gold\",\"impact\":\"positive\",\"magnitude\":\"medium\",\"reason\":\"safe haven\",\"move\":\"+1-2%\",\"confidence\":70}],\"indexes\":[{\"name\":\"NASDAQ\",\"impact\":\"positive\",\"magnitude\":\"high\",\"move\":\"+1-2%\"}],\"sentiment\":\"bullish\",\"severity\":\"high\",\"summary\":\"What happened and why it matters\",\"action\":\"Specific: BUY/SELL/HOLD + which stocks + why\"}";
+      const prompt = "You are a senior Wall Street investment analyst. " + tickerInfo + "Analyze this breaking market news for investment impact. RULES: Fed/rates = HIGH. Earnings beat/miss = HIGH. War/crisis = HIGH. Acquisition = HIGH. Analyst upgrade/downgrade = MEDIUM. Economic data = MEDIUM. NEWS HEADLINE: " + article.title + " DESCRIPTION: " + (article.description || "") + " Return ONLY JSON (no markdown no explanation): {\"stocks\":[{\"symbol\":\"AAPL\",\"impact\":\"positive\",\"magnitude\":\"high\",\"reason\":\"Earnings beat by 12%\",\"move\":\"+6-9%\",\"confidence\":85}],\"metals\":[{\"name\":\"Gold\",\"impact\":\"positive\",\"magnitude\":\"medium\",\"reason\":\"Safe haven demand\",\"move\":\"+1-2%\",\"confidence\":70}],\"indexes\":[{\"name\":\"NASDAQ\",\"impact\":\"positive\",\"magnitude\":\"high\",\"move\":\"+1-2%\"}],\"sentiment\":\"bullish\",\"severity\":\"high\",\"summary\":\"One sentence: what happened and investment implication\",\"action\":\"Specific: BUY AAPL before 10am / SELL GLD / HOLD SPY\"}";
 
       const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + gemKey, {
         method: "POST",
@@ -51,19 +51,17 @@ export default function MarketIntelPro() {
     }
   };
 
-  const fetchFedRate = async () => {
+  const fetchFedRate = async function() {
     try {
       const res = await fetch("https://api.stlouisfed.org/fred/series/data?series_id=FEDFUNDS&api_key=0b43c53f35c7e2c88a7abb31e9ab6f0f&limit=1&sort_order=desc");
       const data = await res.json();
       if (data.observations && data.observations[0]) {
         setFedRate(parseFloat(data.observations[0].value));
       }
-    } catch (e) {
-      setFedRate(4.5);
-    }
+    } catch (e) { setFedRate(4.5); }
   };
 
-  const fetchMetals = async () => {
+  const fetchMetals = async function() {
     try {
       const res = await fetch("/api/metals");
       const data = await res.json();
@@ -78,15 +76,14 @@ export default function MarketIntelPro() {
     }
   };
 
-  const fetchAllNews = async (nKey, gKey, aKey) => {
+  const fetchAllNews = async function(gKey, fKey, mKey) {
     setLoading(true);
     try {
-      const marketUrl = "/api/news?type=market&key=" + nKey + "&akey=" + aKey;
-      const geoUrl = "/api/news?type=geo&key=" + nKey + "&akey=" + aKey;
+      const marketUrl = "/api/news?type=market&fkey=" + fKey + "&mkey=" + mKey;
+      const geoUrl = "/api/news?type=geo&fkey=" + fKey + "&mkey=" + mKey;
 
       const mRes = await fetch(marketUrl);
       const gRes = await fetch(geoUrl);
-
       const mData = await mRes.json();
       const gData = await gRes.json();
 
@@ -94,36 +91,35 @@ export default function MarketIntelPro() {
         const analyzed = await Promise.all(
           mData.articles.slice(0, 6).map(async function(a) {
             const analysis = await analyzeWithGemini(a, gKey);
+            const pubDate = new Date(a.publishedAt);
+            const timeStr = isNaN(pubDate.getTime())
+              ? "Recent"
+              : pubDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
             return {
               id: a.url,
               headline: a.title,
               description: a.description,
               source: a.source ? a.source.name : "Financial News",
-              time: new Date(a.publishedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+              time: timeStr,
               url: a.url,
-              stocks: analysis ? analysis.stocks || [] : [],
-              metals: analysis ? analysis.metals || [] : [],
-              indexes: analysis ? analysis.indexes || [] : [],
-              sentiment: analysis ? analysis.sentiment || "neutral" : "neutral",
-              severity: analysis ? analysis.severity || "medium" : "medium",
-              summary: analysis ? analysis.summary || "" : "",
-              action: analysis ? analysis.action || "" : "",
+              stocks: analysis ? (analysis.stocks || []) : [],
+              metals: analysis ? (analysis.metals || []) : [],
+              indexes: analysis ? (analysis.indexes || []) : [],
+              sentiment: analysis ? (analysis.sentiment || "neutral") : "neutral",
+              severity: analysis ? (analysis.severity || "medium") : "medium",
+              summary: analysis ? (analysis.summary || "") : "",
+              action: analysis ? (analysis.action || "") : "",
               isNew: true
             };
           })
         );
 
-        const validNews = analyzed.filter(function(item) {
-          return item.headline && item.headline.length > 0;
-        });
+        setNews(analyzed.filter(function(item) { return item.headline; }));
 
-        setNews(validNews);
-
-        validNews.forEach(function(item) {
+        analyzed.forEach(function(item) {
           if (item.severity === "high" && typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
-            new Notification("HIGH IMPACT Market Alert!", {
-              body: item.action || item.headline.substring(0, 100)
-            });
+            new Notification("HIGH IMPACT Alert!", { body: item.action || item.headline.substring(0, 100) });
           }
         });
       }
@@ -132,62 +128,61 @@ export default function MarketIntelPro() {
         const analyzed = await Promise.all(
           gData.articles.slice(0, 4).map(async function(a) {
             const analysis = await analyzeWithGemini(a, gKey);
+            const pubDate = new Date(a.publishedAt);
+            const timeStr = isNaN(pubDate.getTime()) ? "Recent" : pubDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
             return {
               id: a.url,
               headline: a.title,
               source: a.source ? a.source.name : "Financial News",
-              time: new Date(a.publishedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+              time: timeStr,
               url: a.url,
-              stocks: analysis ? analysis.stocks || [] : [],
-              metals: analysis ? analysis.metals || [] : [],
-              sentiment: analysis ? analysis.sentiment || "neutral" : "neutral",
-              severity: analysis ? analysis.severity || "medium" : "medium",
-              summary: analysis ? analysis.summary || "" : "",
-              action: analysis ? analysis.action || "" : ""
+              stocks: analysis ? (analysis.stocks || []) : [],
+              metals: analysis ? (analysis.metals || []) : [],
+              sentiment: analysis ? (analysis.sentiment || "neutral") : "neutral",
+              severity: analysis ? (analysis.severity || "medium") : "medium",
+              summary: analysis ? (analysis.summary || "") : "",
+              action: analysis ? (analysis.action || "") : ""
             };
           })
         );
-        setGeoAlerts(analyzed.filter(function(a) { return a.headline && a.headline.length > 0; }));
+        setGeoAlerts(analyzed.filter(function(a) { return a.headline; }));
       }
 
       setLastUpdate(new Date().toLocaleTimeString());
       setTimeout(function() {
         setNews(function(p) { return p.map(function(n) { return Object.assign({}, n, { isNew: false }); }); });
       }, 3000);
-
     } catch (e) {
-      console.error("fetchAllNews error:", e);
+      console.error(e);
     }
     setLoading(false);
   };
 
   useEffect(function() {
-    if (!showSetup && savedGeminiKey && (savedNewsKey || savedAlphaKey)) {
+    if (!showSetup && savedGeminiKey && (savedFinnhubKey || savedMarketauxKey)) {
       fetchFedRate();
       fetchMetals();
-      fetchAllNews(savedNewsKey, savedGeminiKey, savedAlphaKey);
-      if (typeof window !== "undefined" && "Notification" in window) {
-        Notification.requestPermission();
-      }
+      fetchAllNews(savedGeminiKey, savedFinnhubKey, savedMarketauxKey);
+      if (typeof window !== "undefined" && "Notification" in window) Notification.requestPermission();
       const interval = setInterval(function() {
-        fetchAllNews(savedNewsKey, savedGeminiKey, savedAlphaKey);
+        fetchAllNews(savedGeminiKey, savedFinnhubKey, savedMarketauxKey);
         fetchMetals();
       }, 30000);
       return function() { clearInterval(interval); };
     }
-  }, [showSetup, savedNewsKey, savedGeminiKey, savedAlphaKey]);
+  }, [showSetup, savedGeminiKey, savedFinnhubKey, savedMarketauxKey]);
 
   const handleStart = function() {
-    if (!geminiKey || (!newsKey && !alphaKey)) {
-      alert("Please enter Gemini key and at least one news API key");
+    if (!geminiKey || (!finnhubKey && !marketauxKey)) {
+      alert("Please enter Gemini key and at least one of Finnhub or Marketaux key");
       return;
     }
-    localStorage.setItem("newsapi_key", newsKey);
     localStorage.setItem("gemini_key", geminiKey);
-    localStorage.setItem("alpha_key", alphaKey);
-    setSavedNewsKey(newsKey);
+    localStorage.setItem("finnhub_key", finnhubKey);
+    localStorage.setItem("marketaux_key", marketauxKey);
     setSavedGeminiKey(geminiKey);
-    setSavedAlphaKey(alphaKey);
+    setSavedFinnhubKey(finnhubKey);
+    setSavedMarketauxKey(marketauxKey);
     setShowSetup(false);
   };
 
@@ -196,10 +191,9 @@ export default function MarketIntelPro() {
   const sbr = { high: "rgba(239,68,68,0.3)", medium: "rgba(245,158,11,0.3)", low: "rgba(34,197,94,0.2)" };
 
   const sorted = news.slice().sort(function(a, b) {
-    const order = { high: 3, medium: 2, low: 1 };
-    return (order[b.severity] || 0) - (order[a.severity] || 0);
+    const o = { high: 3, medium: 2, low: 1 };
+    return (o[b.severity] || 0) - (o[a.severity] || 0);
   });
-
   const filtered = filter === "all" ? sorted : sorted.filter(function(n) { return n.severity === filter; });
 
   return (
@@ -209,7 +203,7 @@ export default function MarketIntelPro() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
           <div>
             <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 700, color: "#fff" }}>Market Intel Pro</h1>
-            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>USA Stocks, Metals and Indexes - Investment grade news only</p>
+            <p style={{ margin: "2px 0 0", fontSize: "12px", color: "#64748b" }}>USA Stocks, Metals and Indexes - Real-time investment news</p>
           </div>
           {lastUpdate && (
             <div style={{ textAlign: "right" }}>
@@ -222,19 +216,23 @@ export default function MarketIntelPro() {
         {showSetup && (
           <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "12px", padding: "20px", marginBottom: "20px" }}>
             <h2 style={{ margin: "0 0 4px", fontSize: "16px", color: "#fbbf24" }}>One-Time Setup</h2>
-            <p style={{ margin: "0 0 16px", fontSize: "12px", color: "#94a3b8" }}>Keys saved only on your device</p>
+            <p style={{ margin: "0 0 16px", fontSize: "12px", color: "#94a3b8" }}>Keys saved only on your device. Never shared.</p>
+
             <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", fontSize: "12px", color: "#fcd34d", marginBottom: "6px" }}>Alpha Vantage Key - Best for stocks (alphavantage.co)</label>
-              <input type="password" placeholder="Paste Alpha Vantage key" value={alphaKey} onChange={function(e) { setAlphaKey(e.target.value); }} style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "#1e293b", border: "1px solid #10b981", color: "#fff", fontSize: "13px", boxSizing: "border-box" }} />
+              <label style={{ display: "block", fontSize: "12px", color: "#fcd34d", marginBottom: "6px" }}>Marketaux Key - Today's stock news (marketaux.com)</label>
+              <input type="password" placeholder="Paste Marketaux key" value={marketauxKey} onChange={function(e) { setMarketauxKey(e.target.value); }} style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "#1e293b", border: "1px solid #10b981", color: "#fff", fontSize: "13px", boxSizing: "border-box" }} />
             </div>
+
             <div style={{ marginBottom: "12px" }}>
-              <label style={{ display: "block", fontSize: "12px", color: "#fcd34d", marginBottom: "6px" }}>NewsAPI Key - Optional backup (newsapi.org)</label>
-              <input type="password" placeholder="Paste NewsAPI key" value={newsKey} onChange={function(e) { setNewsKey(e.target.value); }} style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "#1e293b", border: "1px solid #334155", color: "#fff", fontSize: "13px", boxSizing: "border-box" }} />
+              <label style={{ display: "block", fontSize: "12px", color: "#fcd34d", marginBottom: "6px" }}>Finnhub Key - Real-time market news (finnhub.io)</label>
+              <input type="password" placeholder="Paste Finnhub key" value={finnhubKey} onChange={function(e) { setFinnhubKey(e.target.value); }} style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "#1e293b", border: "1px solid #10b981", color: "#fff", fontSize: "13px", boxSizing: "border-box" }} />
             </div>
+
             <div style={{ marginBottom: "16px" }}>
-              <label style={{ display: "block", fontSize: "12px", color: "#fcd34d", marginBottom: "6px" }}>Google Gemini Key - Required for AI analysis (aistudio.google.com)</label>
+              <label style={{ display: "block", fontSize: "12px", color: "#fcd34d", marginBottom: "6px" }}>Google Gemini Key - AI analysis (aistudio.google.com)</label>
               <input type="password" placeholder="Paste Gemini key" value={geminiKey} onChange={function(e) { setGeminiKey(e.target.value); }} style={{ width: "100%", padding: "10px", borderRadius: "8px", background: "#1e293b", border: "1px solid #334155", color: "#fff", fontSize: "13px", boxSizing: "border-box" }} />
             </div>
+
             <button onClick={handleStart} style={{ width: "100%", padding: "12px", borderRadius: "8px", background: "linear-gradient(135deg,#10b981,#059669)", border: "none", color: "#fff", fontSize: "15px", fontWeight: 700, cursor: "pointer" }}>
               Start Monitoring Markets
             </button>
@@ -252,8 +250,7 @@ export default function MarketIntelPro() {
                 </div>
               )}
               {metals && Object.entries(metals).map(function(entry) {
-                const k = entry[0];
-                const v = entry[1];
+                var k = entry[0]; var v = entry[1];
                 return (
                   <div key={k} style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: "10px", padding: "12px" }}>
                     <p style={{ margin: "0 0 2px", fontSize: "10px", color: "#fcd34d", textTransform: "uppercase", fontWeight: 600 }}>{k}</p>
@@ -273,36 +270,34 @@ export default function MarketIntelPro() {
                   </button>
                 );
               })}
-              <button onClick={function() { fetchAllNews(savedNewsKey, savedGeminiKey, savedAlphaKey); fetchMetals(); }} disabled={loading} style={{ padding: "4px 12px", borderRadius: "20px", border: "1px solid #334155", background: "transparent", color: loading ? "#475569" : "#94a3b8", fontSize: "11px", cursor: loading ? "not-allowed" : "pointer", marginLeft: "auto" }}>
+              <button onClick={function() { fetchAllNews(savedGeminiKey, savedFinnhubKey, savedMarketauxKey); fetchMetals(); }} disabled={loading} style={{ padding: "4px 12px", borderRadius: "20px", border: "1px solid #334155", background: "transparent", color: loading ? "#475569" : "#94a3b8", fontSize: "11px", cursor: loading ? "not-allowed" : "pointer", marginLeft: "auto" }}>
                 {loading ? "Updating..." : "Refresh Now"}
               </button>
             </div>
 
             {geoAlerts.length > 0 && (
               <div style={{ marginBottom: "20px" }}>
-                <h2 style={{ margin: "0 0 10px", fontSize: "13px", color: "#f87171", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Geopolitical Market Alerts</h2>
+                <h2 style={{ margin: "0 0 10px", fontSize: "13px", color: "#f87171", fontWeight: 700, textTransform: "uppercase" }}>Geopolitical Alerts</h2>
                 {geoAlerts.map(function(a, i) {
                   return (
                     <div key={i} style={{ background: sb[a.severity] || sb.medium, border: "1px solid " + (sbr[a.severity] || sbr.medium), borderRadius: "10px", padding: "14px", marginBottom: "10px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", marginBottom: "6px" }}>
-                        <h3 style={{ margin: 0, fontSize: "13px", color: "#fff", fontWeight: 600, flex: 1, lineHeight: 1.4 }}>{a.headline}</h3>
-                        <span style={{ background: sc[a.severity] || sc.medium, color: "#fff", padding: "2px 8px", borderRadius: "10px", fontSize: "10px", fontWeight: 700, whiteSpace: "nowrap", height: "fit-content" }}>{(a.severity || "MEDIUM").toUpperCase()}</span>
+                        <h3 style={{ margin: 0, fontSize: "13px", color: "#fff", fontWeight: 600, flex: 1 }}>{a.headline}</h3>
+                        <span style={{ background: sc[a.severity] || sc.medium, color: "#fff", padding: "2px 8px", borderRadius: "10px", fontSize: "10px", fontWeight: 700, whiteSpace: "nowrap" }}>{(a.severity || "").toUpperCase()}</span>
                       </div>
                       <p style={{ margin: "0 0 6px", fontSize: "11px", color: "#64748b" }}>{a.time} - {a.source}</p>
-                      {a.summary && <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#cbd5e1", lineHeight: 1.5 }}>{a.summary}</p>}
+                      {a.summary && <p style={{ margin: "0 0 6px", fontSize: "12px", color: "#cbd5e1" }}>{a.summary}</p>}
                       {a.action && (
-                        <div style={{ margin: "8px 0", padding: "8px 10px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: "6px" }}>
+                        <div style={{ padding: "8px 10px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: "6px", marginBottom: "8px" }}>
                           <p style={{ margin: 0, fontSize: "12px", color: "#10b981", fontWeight: 700 }}>Action: {a.action}</p>
                         </div>
                       )}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                         {a.stocks && a.stocks.map(function(s, j) {
                           return (
                             <div key={j} style={{ background: "rgba(15,23,42,0.8)", border: "1px solid " + (s.impact === "positive" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"), borderRadius: "6px", padding: "6px 10px" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ fontWeight: 700, color: "#fff", fontSize: "12px" }}>{s.symbol}</span>
-                                <span style={{ color: s.impact === "positive" ? "#22c55e" : "#ef4444", fontSize: "11px", fontWeight: 700 }}>{s.impact === "positive" ? "UP" : "DOWN"} {s.move}</span>
-                              </div>
+                              <span style={{ fontWeight: 700, color: "#fff", fontSize: "12px" }}>{s.symbol}</span>
+                              <span style={{ color: s.impact === "positive" ? "#22c55e" : "#ef4444", fontSize: "11px", marginLeft: "6px", fontWeight: 700 }}>{s.impact === "positive" ? "UP" : "DOWN"} {s.move}</span>
                               <p style={{ margin: "2px 0 0", fontSize: "10px", color: "#64748b" }}>{s.reason}</p>
                             </div>
                           );
@@ -314,15 +309,14 @@ export default function MarketIntelPro() {
               </div>
             )}
 
-            <h2 style={{ margin: "0 0 10px", fontSize: "13px", color: "#10b981", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-              Investment News - Ranked by Market Impact
+            <h2 style={{ margin: "0 0 10px", fontSize: "13px", color: "#10b981", fontWeight: 700, textTransform: "uppercase" }}>
+              Investment News - Ranked by Impact
             </h2>
 
             {loading && news.length === 0 && (
               <div style={{ textAlign: "center", padding: "40px 0", color: "#475569" }}>
-                <p style={{ fontSize: "28px", margin: "0 0 8px" }}>Analyzing markets...</p>
-                <p style={{ fontSize: "13px" }}>Fetching investment news from Alpha Vantage</p>
-                <p style={{ fontSize: "12px" }}>Running AI impact analysis...</p>
+                <p style={{ fontSize: "14px" }}>Fetching real-time investment news...</p>
+                <p style={{ fontSize: "12px" }}>Analyzing stock impacts with AI...</p>
               </div>
             )}
 
@@ -331,7 +325,7 @@ export default function MarketIntelPro() {
                 return (
                   <div key={item.id} style={{ background: sb[item.severity] || "rgba(30,41,59,0.5)", border: "1px solid " + (sbr[item.severity] || "#334155"), borderRadius: "12px", padding: "14px", outline: item.isNew ? "2px solid #10b981" : "none" }}>
                     <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                      <span style={{ fontSize: "18px", fontWeight: 800, color: sc[item.severity] || "#fff", minWidth: "22px", lineHeight: 1 }}>{idx + 1}</span>
+                      <span style={{ fontSize: "18px", fontWeight: 800, color: sc[item.severity] || "#fff", minWidth: "22px" }}>{idx + 1}</span>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", marginBottom: "4px" }}>
                           <h3 style={{ margin: 0, fontSize: "13px", color: "#fff", fontWeight: 600, lineHeight: 1.4, flex: 1 }}>{item.headline}</h3>
@@ -354,22 +348,18 @@ export default function MarketIntelPro() {
 
                     {item.stocks && item.stocks.length > 0 && (
                       <div style={{ paddingLeft: "30px", marginBottom: "8px" }}>
-                        <p style={{ margin: "0 0 8px", fontSize: "10px", color: "#475569", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Stocks - Most to Least Impact</p>
+                        <p style={{ margin: "0 0 8px", fontSize: "10px", color: "#475569", fontWeight: 700, textTransform: "uppercase" }}>Stocks - Most to Least Impact</p>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(145px,1fr))", gap: "6px" }}>
                           {item.stocks.map(function(s, j) {
                             return (
                               <div key={j} style={{ background: "rgba(15,23,42,0.8)", border: "1px solid " + (s.impact === "positive" ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"), borderRadius: "8px", padding: "8px 10px" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
                                   <span style={{ fontWeight: 800, color: "#fff", fontSize: "13px" }}>{s.symbol}</span>
-                                  <span style={{ fontSize: "10px", padding: "1px 5px", borderRadius: "4px", background: s.magnitude === "high" ? "rgba(239,68,68,0.25)" : s.magnitude === "medium" ? "rgba(245,158,11,0.25)" : "rgba(59,130,246,0.25)", color: s.magnitude === "high" ? "#fca5a5" : s.magnitude === "medium" ? "#fcd34d" : "#93c5fd", fontWeight: 700 }}>
-                                    {(s.magnitude || "MED").toUpperCase()}
-                                  </span>
+                                  <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "4px", background: s.magnitude === "high" ? "rgba(239,68,68,0.25)" : "rgba(245,158,11,0.25)", color: s.magnitude === "high" ? "#fca5a5" : "#fcd34d", fontWeight: 700 }}>{(s.magnitude || "MED").toUpperCase()}</span>
                                 </div>
-                                <p style={{ margin: "0 0 4px", fontSize: "10px", color: "#94a3b8", lineHeight: 1.3 }}>{s.reason}</p>
-                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                  <span style={{ fontSize: "13px", fontWeight: 700, color: s.impact === "positive" ? "#22c55e" : "#ef4444" }}>
-                                    {s.impact === "positive" ? "UP " : "DOWN "}{s.move}
-                                  </span>
+                                <p style={{ margin: "0 0 4px", fontSize: "10px", color: "#94a3b8" }}>{s.reason}</p>
+                                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                  <span style={{ fontSize: "13px", fontWeight: 700, color: s.impact === "positive" ? "#22c55e" : "#ef4444" }}>{s.impact === "positive" ? "UP " : "DOWN "}{s.move}</span>
                                   {s.confidence && <span style={{ fontSize: "10px", color: "#475569" }}>{s.confidence}%</span>}
                                 </div>
                               </div>
@@ -383,13 +373,11 @@ export default function MarketIntelPro() {
                       <div style={{ paddingLeft: "30px", marginBottom: "8px" }}>
                         <p style={{ margin: "0 0 6px", fontSize: "10px", color: "#475569", fontWeight: 700, textTransform: "uppercase" }}>Index Impact</p>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                          {item.indexes.map(function(idx2, j) {
+                          {item.indexes.map(function(ix, j) {
                             return (
                               <div key={j} style={{ background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.25)", borderRadius: "6px", padding: "4px 10px" }}>
-                                <span style={{ color: "#93c5fd", fontWeight: 700, fontSize: "12px" }}>{idx2.name}</span>
-                                <span style={{ color: idx2.impact === "positive" ? "#22c55e" : "#ef4444", fontSize: "11px", marginLeft: "6px", fontWeight: 700 }}>
-                                  {idx2.impact === "positive" ? "UP " : "DOWN "}{idx2.move}
-                                </span>
+                                <span style={{ color: "#93c5fd", fontWeight: 700, fontSize: "12px" }}>{ix.name}</span>
+                                <span style={{ color: ix.impact === "positive" ? "#22c55e" : "#ef4444", fontSize: "11px", marginLeft: "6px", fontWeight: 700 }}>{ix.impact === "positive" ? "UP " : "DOWN "}{ix.move}</span>
                               </div>
                             );
                           })}
@@ -405,10 +393,7 @@ export default function MarketIntelPro() {
                             return (
                               <div key={j} style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.25)", borderRadius: "6px", padding: "4px 10px" }}>
                                 <span style={{ color: "#fcd34d", fontWeight: 700, fontSize: "12px" }}>{m.name}</span>
-                                <span style={{ color: m.impact === "positive" ? "#22c55e" : "#ef4444", fontSize: "11px", marginLeft: "4px", fontWeight: 700 }}>
-                                  {m.impact === "positive" ? "UP " : "DOWN "}{m.move}
-                                </span>
-                                {m.confidence && <span style={{ fontSize: "10px", color: "#475569", marginLeft: "4px" }}>{m.confidence}%</span>}
+                                <span style={{ color: m.impact === "positive" ? "#22c55e" : "#ef4444", fontSize: "11px", marginLeft: "4px", fontWeight: 700 }}>{m.impact === "positive" ? "UP " : "DOWN "}{m.move}</span>
                               </div>
                             );
                           })}
@@ -416,17 +401,15 @@ export default function MarketIntelPro() {
                       </div>
                     )}
 
-                    <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: "8px", marginLeft: "30px", fontSize: "11px", color: "#10b981", textDecoration: "none" }}>
-                      Read full article
-                    </a>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer" style={{ display: "inline-block", marginTop: "8px", marginLeft: "30px", fontSize: "11px", color: "#10b981", textDecoration: "none" }}>Read full article</a>
                   </div>
                 );
               })}
             </div>
 
             <div style={{ marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #1e293b", textAlign: "center" }}>
-              <p style={{ margin: 0, fontSize: "11px", color: "#334155" }}>Market Intel Pro - Investment news only - Alpha Vantage - Updates every 30s</p>
-              <button onClick={function() { if (typeof window !== "undefined") { localStorage.clear(); } setShowSetup(true); setSavedNewsKey(""); setSavedGeminiKey(""); setSavedAlphaKey(""); }} style={{ marginTop: "6px", background: "none", border: "none", color: "#475569", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>
+              <p style={{ margin: 0, fontSize: "11px", color: "#334155" }}>Market Intel Pro - Marketaux + Finnhub - Real-time - Updates every 30s</p>
+              <button onClick={function() { if (typeof window !== "undefined") localStorage.clear(); setShowSetup(true); setSavedGeminiKey(""); setSavedFinnhubKey(""); setSavedMarketauxKey(""); }} style={{ marginTop: "6px", background: "none", border: "none", color: "#475569", fontSize: "11px", cursor: "pointer", textDecoration: "underline" }}>
                 Change API Keys
               </button>
             </div>
