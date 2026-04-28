@@ -88,13 +88,17 @@ export async function GET(request) {
       return true;
     });
 
-    // Sort by date newest first
-    articles.sort(function(a, b) {
-      return new Date(b.publishedAt) - new Date(a.publishedAt);
-    });
+    // Filter last 6 hours only
+const sixHoursAgo = Date.now() - (6 * 60 * 60 * 1000);
+articles = articles.filter(function(a) {
+  var pubDate = new Date(a.publishedAt).getTime();
+  return pubDate > sixHoursAgo;
+});
 
-    // Keep top 8
-    articles = articles.slice(0, 8);
+// Sort by date newest first
+articles.sort(function(a, b) {
+  return new Date(b.publishedAt) - new Date(a.publishedAt);
+});
 
     return Response.json({ articles: articles, total: articles.length });
 
