@@ -115,7 +115,6 @@ articles = articles
   .slice(0, 8);
 
 return Response.json({ articles, status: "ok", total: articles.length });
-```
 
 } catch (error) {
 return Response.json({ error: “Failed to fetch news”, articles: [] }, { status: 500 });
